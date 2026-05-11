@@ -1,0 +1,68 @@
+# Create GitHub Actions workflow to deploy Apache web server
+name: Deploy Apache Web Server
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/apache
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: docker/setup-buildx-action@v2
+
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Deploy to Kubernetes
+        uses: appleboy/k8s-action@v0.2.0
+        with:
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+          manifest: |
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: apache-deployment
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: apache
+              template:
+                metadata:
+                  labels:
+                    app: apache
+                spec:
+                  containers:
+                  - name: apache
+                    image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+                    imagePullPolicy: IfNotPresent
+                    ports:
+                    - containerPort: 80
+
